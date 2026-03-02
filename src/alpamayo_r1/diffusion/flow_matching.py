@@ -32,7 +32,7 @@ class FlowMatching(BaseDiffusion):
     def __init__(
         self,
         int_method: Literal["euler"] = "euler",
-        num_inference_steps: int = 10,
+        num_inference_steps: int = 5,
         *args,
         **kwargs,
     ):

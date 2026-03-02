@@ -62,7 +62,7 @@ def add(num1: int, num2: int) -> int:
 - 采用 **snake_case** 风格（下划线分隔单词）
 
 ```python
-# ❌ 避免
+# 避免
 def calc(a, b): ...
 x = get_data()
 

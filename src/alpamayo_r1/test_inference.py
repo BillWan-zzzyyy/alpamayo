@@ -19,6 +19,7 @@
 
 import torch
 import numpy as np
+import time
 
 from alpamayo_r1.models.alpamayo_r1 import AlpamayoR1
 from alpamayo_r1.load_physical_aiavdataset import load_physical_aiavdataset
@@ -27,6 +28,8 @@ from alpamayo_r1 import helper
 
 # Example clip ID
 clip_id = "030c760c-ae38-49aa-9ad8-f5650a545d26"
+t_start_total = time.perf_counter()
+t_start_load = t_start_total
 print(f"Loading dataset for clip_id: {clip_id}...")
 data = load_physical_aiavdataset(clip_id, t0_us=5_100_000)
 print("Dataset loaded.")
@@ -50,6 +53,10 @@ model_inputs = {
 }
 
 model_inputs = helper.to_device(model_inputs, "cuda")
+if torch.cuda.is_available():
+    torch.cuda.synchronize()
+t_end_load = time.perf_counter()
+timing_load_ms = (t_end_load - t_start_load) * 1000.0
 
 torch.cuda.manual_seed_all(42)
 with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -61,9 +68,30 @@ with torch.autocast("cuda", dtype=torch.bfloat16):
         max_generation_length=256,
         return_extra=True,
     )
+if torch.cuda.is_available():
+    torch.cuda.synchronize()
+t_end_total = time.perf_counter()
+timing_total_ms = (t_end_total - t_start_total) * 1000.0
+timing_cot_ms = float(
+    extra.get(
+        "timing_cot_ms",
+        float(extra.get("timing_cot_s", float("nan"))) * 1000.0,
+    )
+)
+timing_traj_gen_ms = float(
+    extra.get(
+        "timing_traj_gen_ms",
+        float(extra.get("timing_traj_gen_s", float("nan"))) * 1000.0,
+    )
+)
 
 # the size is [batch_size, num_traj_sets, num_traj_samples]
 print("Chain-of-Causation (per trajectory):\n", extra["cot"][0])
+print("\n=== 耗时统计 ===")
+print(f"数据加载与预处理: {timing_load_ms:.2f} ms")
+print(f"CoT 推理:         {timing_cot_ms:.2f} ms")
+print(f"轨迹生成:         {timing_traj_gen_ms:.2f} ms")
+print(f"总耗时:           {timing_total_ms:.2f} ms")
 
 gt_xy = data["ego_future_xyz"].cpu()[0, 0, :, :2].T.numpy()
 pred_xy = pred_xyz.cpu().numpy()[0, 0, :, :, :2].transpose(0, 2, 1)

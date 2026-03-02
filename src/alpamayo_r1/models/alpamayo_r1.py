@@ -15,6 +15,7 @@
 
 import copy
 import logging
+import time
 from typing import Any
 
 import einops
@@ -189,6 +190,9 @@ class AlpamayoR1(ReasoningVLA):
                 )
             ]
         )
+        if device.type == "cuda":
+            torch.cuda.synchronize(device=device)
+        t_start_cot = time.perf_counter()
         vlm_outputs = self.vlm.generate(
             input_ids=input_ids,
             generation_config=generation_config,
@@ -196,6 +200,9 @@ class AlpamayoR1(ReasoningVLA):
             logits_processor=logits_processor,
             **tokenized_data,
         )
+        if device.type == "cuda":
+            torch.cuda.synchronize(device=device)
+        timing_cot_ms = (time.perf_counter() - t_start_cot) * 1000.0
         vlm_outputs.rope_deltas = self.vlm.model.rope_deltas
 
         # manually replace padding after EOS token
@@ -288,6 +295,9 @@ class AlpamayoR1(ReasoningVLA):
         if diffusion_kwargs is None:
             diffusion_kwargs = {}
 
+        if device.type == "cuda":
+            torch.cuda.synchronize(device=device)
+        t_start_traj_gen = time.perf_counter()
         sampled_action = self.diffusion.sample(
             batch_size=total_batch,
             step_fn=step_fn,
@@ -307,6 +317,9 @@ class AlpamayoR1(ReasoningVLA):
         pred_xyz, pred_rot = self.action_space.action_to_traj(
             sampled_action, hist_xyz_rep, hist_rot_rep
         )
+        if device.type == "cuda":
+            torch.cuda.synchronize(device=device)
+        timing_traj_gen_ms = (time.perf_counter() - t_start_traj_gen) * 1000.0
 
         # 4) Reshape to (B, num_traj_samples, n_traj, ...)
         pred_xyz = einops.rearrange(
@@ -324,6 +337,8 @@ class AlpamayoR1(ReasoningVLA):
                 extra[text_tokens] = np.array(extra[text_tokens]).reshape(
                     [input_ids.shape[0], num_traj_sets, num_traj_samples]
                 )
+            extra["timing_cot_ms"] = timing_cot_ms
+            extra["timing_traj_gen_ms"] = timing_traj_gen_ms
             return pred_xyz, pred_rot, extra
         return pred_xyz, pred_rot
 
