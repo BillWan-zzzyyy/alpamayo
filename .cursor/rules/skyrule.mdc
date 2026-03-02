@@ -1,0 +1,85 @@
+---
+description: SKY-LAB Code Review 基本原则 - 代码拆分、注释、命名与模块化
+alwaysApply: true
+---
+
+# 课题组代码编写基本原则
+
+## 1. 模块化
+
+### 单一职责
+- 每个模块或函数只完成一个功能或逻辑部分
+- 数据处理、业务逻辑、展示应分成不同文件
+- 参考：https://github.com/cookbenjamin/DDPG/tree/master/networks
+
+### 文件拆分
+- 按功能模块拆分成多个文件，避免单文件过大
+- 单文件通常控制在 **300 行以内**
+- 通用功能和工具函数放在单独文件中
+- 需要独立测试的功能放在单独文件中
+- 配置参数和变量放在单独的配置文件中
+
+## 2. 函数拆分
+
+- 提高可读性和可维护性
+- 函数代码行数较少或结构简单时，可留在主函数中，但需添加注释说明
+
+## 3. 注释规范
+
+### 函数注释
+- 每个函数需有详细注释：功能、参数、返回值
+- 重要函数需给出示例
+
+```python
+# 示例
+def add(num1: int, num2: int) -> int:
+    """
+    计算两数之和。
+
+    Args:
+        num1: 第一个加数
+        num2: 第二个加数
+
+    Returns:
+        两数之和
+
+    Example:
+        add(2, 3)  # input [2, 3]  output 5
+    """
+    return num1 + num2
+```
+
+### 模块说明
+- 每个脚本/模块文件头部需有模块功能概述
+
+### 属性说明
+- 重要参数需给出解释
+
+## 4. 命名规范
+
+- 使用有意义的变量名和函数名
+- 避免缩写或不明确的命名
+- 采用 **snake_case** 风格（下划线分隔单词）
+
+```python
+# ❌ 避免
+def calc(a, b): ...
+x = get_data()
+
+# ✅ 推荐
+def calculate_total_price(item_price: float, quantity: int) -> float: ...
+user_profile_data = fetch_user_profile()
+```
+
+## 5. 环境要求
+
+### 包版本管理
+- 明确标注每个依赖包的版本
+- 使用 `requirements.txt` 或 `environment.yml` 时指定版本号
+
+```python
+# requirements.txt 示例
+numpy==1.24.0
+opencv-python==4.8.0.74
+# 避免无版本：numpy
+```
