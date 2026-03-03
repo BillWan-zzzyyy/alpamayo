@@ -78,6 +78,7 @@ timing_cot_ms = float(
         float(extra.get("timing_cot_s", float("nan"))) * 1000.0,
     )
 )
+timing_vision_ms = float(extra.get("timing_vision_ms", float("nan")))
 timing_traj_gen_ms = float(
     extra.get(
         "timing_traj_gen_ms",
@@ -89,6 +90,7 @@ timing_traj_gen_ms = float(
 print("Chain-of-Causation (per trajectory):\n", extra["cot"][0])
 print("\n=== 耗时统计 ===")
 print(f"数据加载与预处理: {timing_load_ms:.2f} ms")
+print(f"Vision Encoder:   {timing_vision_ms:.2f} ms")
 print(f"CoT 推理:         {timing_cot_ms:.2f} ms")
 print(f"轨迹生成:         {timing_traj_gen_ms:.2f} ms")
 print(f"总耗时:           {timing_total_ms:.2f} ms")

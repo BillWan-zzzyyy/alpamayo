@@ -39,6 +39,62 @@ from alpamayo_r1.models.token_utils import (
 logger = logging.getLogger(__name__)
 
 
+class VisionEncoderTimer:
+    """Measure vision encoder forward time with CUDA events."""
+
+    def __init__(self, enabled: bool = True):
+        """Initialize timer state.
+
+        Args:
+            enabled: Whether CUDA event timing is enabled.
+        """
+        self.enabled = enabled
+        self.start_event: torch.cuda.Event | None = None
+        self.end_event: torch.cuda.Event | None = None
+        self.elapsed_ms = float("nan")
+        self._handles: list[torch.utils.hooks.RemovableHandle] = []
+
+    def attach(self, module: torch.nn.Module) -> None:
+        """Attach pre/post forward hooks to a module.
+
+        Args:
+            module: Module to be timed.
+        """
+        self._handles.append(module.register_forward_pre_hook(self._pre_hook))
+        self._handles.append(module.register_forward_hook(self._post_hook))
+
+    def _pre_hook(self, module: torch.nn.Module, args: tuple[Any, ...]) -> None:
+        """Record start CUDA event before forward."""
+        if not self.enabled:
+            return
+        self.start_event = torch.cuda.Event(enable_timing=True)
+        self.end_event = torch.cuda.Event(enable_timing=True)
+        self.start_event.record()
+
+    def _post_hook(
+        self, module: torch.nn.Module, args: tuple[Any, ...], output: Any
+    ) -> None:
+        """Record end CUDA event after forward."""
+        if not self.enabled or self.end_event is None:
+            return
+        self.end_event.record()
+
+    def sync_and_elapsed(self) -> float:
+        """Synchronize and return elapsed milliseconds."""
+        if not self.enabled:
+            return self.elapsed_ms
+        if self.start_event is not None and self.end_event is not None:
+            self.end_event.synchronize()
+            self.elapsed_ms = self.start_event.elapsed_time(self.end_event)
+        return self.elapsed_ms
+
+    def remove(self) -> None:
+        """Remove all installed hooks."""
+        for handle in self._handles:
+            handle.remove()
+        self._handles.clear()
+
+
 class ExpertLogitsProcessor(LogitsProcessor):
     """Masks out the logits for discrete trajectory tokens."""
 
@@ -190,19 +246,26 @@ class AlpamayoR1(ReasoningVLA):
                 )
             ]
         )
-        if device.type == "cuda":
-            torch.cuda.synchronize(device=device)
-        t_start_cot = time.perf_counter()
-        vlm_outputs = self.vlm.generate(
-            input_ids=input_ids,
-            generation_config=generation_config,
-            stopping_criteria=stopping_criteria,
-            logits_processor=logits_processor,
-            **tokenized_data,
-        )
-        if device.type == "cuda":
-            torch.cuda.synchronize(device=device)
-        timing_cot_ms = (time.perf_counter() - t_start_cot) * 1000.0
+        timing_vision_ms = float("nan")
+        vision_timer = VisionEncoderTimer(enabled=device.type == "cuda")
+        vision_timer.attach(self.vlm.model.visual)
+        try:
+            if device.type == "cuda":
+                torch.cuda.synchronize(device=device)
+            t_start_cot = time.perf_counter()
+            vlm_outputs = self.vlm.generate(
+                input_ids=input_ids,
+                generation_config=generation_config,
+                stopping_criteria=stopping_criteria,
+                logits_processor=logits_processor,
+                **tokenized_data,
+            )
+            if device.type == "cuda":
+                torch.cuda.synchronize(device=device)
+            timing_cot_ms = (time.perf_counter() - t_start_cot) * 1000.0
+            timing_vision_ms = vision_timer.sync_and_elapsed()
+        finally:
+            vision_timer.remove()
         vlm_outputs.rope_deltas = self.vlm.model.rope_deltas
 
         # manually replace padding after EOS token
@@ -305,7 +368,7 @@ class AlpamayoR1(ReasoningVLA):
             return_all_steps=False,
             **diffusion_kwargs,
         )
-
+        timing_traj_gen_ms = (time.perf_counter() - t_start_traj_gen) * 1000.0
         # Repeat history to align with num_traj_samples
         hist_xyz_rep = einops.repeat(
             ego_history_xyz[:, -1], "b ... -> (b n) ...", n=n_samples_total
@@ -319,7 +382,7 @@ class AlpamayoR1(ReasoningVLA):
         )
         if device.type == "cuda":
             torch.cuda.synchronize(device=device)
-        timing_traj_gen_ms = (time.perf_counter() - t_start_traj_gen) * 1000.0
+        
 
         # 4) Reshape to (B, num_traj_samples, n_traj, ...)
         pred_xyz = einops.rearrange(
@@ -338,6 +401,7 @@ class AlpamayoR1(ReasoningVLA):
                     [input_ids.shape[0], num_traj_sets, num_traj_samples]
                 )
             extra["timing_cot_ms"] = timing_cot_ms
+            extra["timing_vision_ms"] = timing_vision_ms
             extra["timing_traj_gen_ms"] = timing_traj_gen_ms
             return pred_xyz, pred_rot, extra
         return pred_xyz, pred_rot
